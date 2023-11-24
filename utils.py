@@ -16,6 +16,7 @@ import awswrangler as wr
 import numpy as np
 from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.metrics import confusion_matrix
+import yfinance as yf
 
 # Structute here https://lucid.app/lucidchart/14b08a83-e0f2-41cd-ba35-fdc75a5766b9/edit?viewport_loc=593%2C1059%2C2535%2C1475%2C0_0&invitationId=inv_74a325be-a0ec-4f6e-9d04-6a35815b8ab5
 num_quantiles = 2
@@ -585,9 +586,11 @@ def sp_500_returns(df, date, frequency):
 
     return df_cumulative_returns
 
-def add_benchmark(backtest_data:pd.DataFrame, index='GSPC') -> pd.DataFrame:
+def add_benchmark(backtest_data:pd.DataFrame, start_from="2020-01-01") -> pd.DataFrame:
     '''Add cumulative returns for SP500 to backtest data, default based on GSPC index'''
-    prices = wr.s3.read_csv(f's3://company-data-hub/prices/{index}.csv', index_col='Date', parse_dates=True)
+    #prices = wr.s3.read_csv(f's3://company-data-hub/prices/{index}.csv', index_col='Date', parse_dates=True)
+    prices = yf.download("^GSPC", start=start_from)
+    
     # Calculate log returns
     log_returns = np.log(prices['Adj Close'] / prices['Adj Close'].shift(1)).to_frame()
     log_returns.columns = ['SP500']
