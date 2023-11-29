@@ -20,7 +20,8 @@ def parse_arguments():
     parser.add_argument('--leverage', type=float, default=1.5, help='Leverage of the portfolio')
     model_types = ["xgboost", "ridge", "lasso"]
     parser.add_argument('--model', type=str, default="xgboost", choices=model_types, help=f'ML algorithm for training. Eligible options: {model_types}')
-    parser.add_argument('--start', type=str, default="2005-12-31", help='Start of the training period')
+    parser.add_argument('--preselection', type=bool, default=False, help="If True, features are filtered by preselected in order to reduce dimensionality")
+    parser.add_argument('--start', type=str, default="2010-12-31", help='Start of the training period')
     parser.add_argument('--test_start', type=str, default="2019-12-31", help='Start of the testing period. Relevant just for fixed_period.')
     training_modes = ["fixed_period", "walk_forward"]
     parser.add_argument('--training_mode', type=str, default="fixed_period", choices=training_modes, help="Mode of training: fixed_period or walk_forward")
@@ -68,6 +69,8 @@ def load_and_preprocess_data():
     captions = pd.read_csv('data/feats_captions.csv').drop('Index', axis=1).values.squeeze().tolist()
     df_filled = pd.read_csv('data/features.csv').dropna()
     df_filled['Date'] = pd.to_datetime(df_filled['Date'])
+    if PRESELECTION:
+        df_filled = df_filled[captions] # filter out preselected features for better convergence
     normalized_df = df_filled.groupby('Date').apply(scale).reset_index(drop=True).sort_values(["Symbol", "Date"]).reset_index(drop=True)
     return df_filled, normalized_df
 
@@ -182,6 +185,7 @@ if __name__ == "__main__":
     TRAINING_MODE = args.training_mode
     START = args.start
     TEST_START = args.test_start
+    PRESELECTION = args.preselection
     TRAINING_WINDOW = timedelta(days=7 * 365)  # 7 years
     TESTING_WINDOW = timedelta(days=365)       # 1 year
 
@@ -200,7 +204,7 @@ if __name__ == "__main__":
     print("*************************************************************")
     print("                     EQUITY CURVES FOR LAST 4 YEARS          ")
     print("*************************************************************")
-    print(equity_curves.iloc[8:])
+    print(equity_curves.iloc[-48:])
 
     print("*************************************************************")
     print("                     FINAL RESULTS                           ")
