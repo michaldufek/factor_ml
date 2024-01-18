@@ -13,7 +13,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Train and evaluate multi-factor models.')
     parser.add_argument('--frequency', type=str, default='M', help='Frequency for backtest')
     parser.add_argument('--backtest_period', type=str, default='2023-01-01', help='Start date for the backtest period')
-    parser.add_argument('--num_stocks', type=int, default=6, help='Number of stocks in the portfolio')
+    parser.add_argument('--num_stocks', type=int, default=20, help='Number of stocks in the portfolio')
     parser.add_argument('--long_only', action='store_true', help='Flag for long-only portfolio')
     parser.add_argument('--simul_random_backtest', action='store_true', help='Flag for simulating random backtest')
     parser.add_argument('--exposure', type=float, default=0.5, help='Exposure of the portfolio')
@@ -22,12 +22,11 @@ def parse_arguments():
     parser.add_argument('--model', type=str, default="xgboost", choices=model_types, help=f'ML algorithm for training. Eligible options: {model_types}')
     parser.add_argument('--preselection', type=bool, default=False, help="If True, features are filtered by preselected in order to reduce dimensionality")
     parser.add_argument('--start', type=str, default="2010-12-31", help='Start of the training period')
-    parser.add_argument('--test_start', type=str, default="2019-12-31", help='Start of the testing period. Relevant just for fixed_period.')
+    parser.add_argument('--test_start', type=str, default="2017-12-31", help='Start of the testing period. Relevant just for fixed_period.')
     training_modes = ["fixed_period", "walk_forward"]
     parser.add_argument('--training_mode', type=str, default="fixed_period", choices=training_modes, help="Mode of training: fixed_period or walk_forward")
 
     return parser.parse_args()
-
 
 def scale(pdf):
     '''User-defined-function for vectorized crosssectional scaling'''
@@ -66,8 +65,11 @@ def evaluate_model(model, X_test, y_test):
     return mse, rmse, r2
 
 def load_and_preprocess_data():
-    captions = pd.read_csv('data/feats_captions.csv').drop('Index', axis=1).values.squeeze().tolist()
-    df_filled = pd.read_csv('data/features.csv').dropna()
+    #captions = pd.read_csv('data/feats_captions.csv').drop('Index', axis=1).values.squeeze().tolist()
+    captions = pd.read_csv('/home/dufek/Downloads/captions(17).csv').drop('Index', axis=1).values.squeeze().tolist()
+
+    #df_filled = pd.read_csv('data/features.csv').dropna()
+    df_filled = pd.read_csv('/home/dufek/Downloads/df_filled(6).csv').dropna()
     df_filled['Date'] = pd.to_datetime(df_filled['Date'])
     if PRESELECTION:
         df_filled = df_filled[captions] # filter out preselected features for better convergence
@@ -123,7 +125,9 @@ def walk_forward_analysis(df_filled, normalized_df):
 
     while current_date + TRAINING_WINDOW < end_date:
         training_end, testing_end = current_date + TRAINING_WINDOW, current_date + TRAINING_WINDOW + TESTING_WINDOW
+        print("**************************************************************************")
         print(f"Testing period from {training_end} to {testing_end}")
+        print("**************************************************************************")
 
         # Splitting the data
         X_train, y_train, X_test, y_test = split_data(normalized_df, current_date, training_end, testing_end)
@@ -186,8 +190,8 @@ if __name__ == "__main__":
     START = args.start
     TEST_START = args.test_start
     PRESELECTION = args.preselection
-    TRAINING_WINDOW = timedelta(days=7 * 365)  # 7 years
-    TESTING_WINDOW = timedelta(days=365)       # 1 year
+    TRAINING_WINDOW = timedelta(days=int(7 * 365))  # 7 years
+    TESTING_WINDOW = timedelta(days=int(1 * 365))       # 1 year
 
     df_filled, normalized_df = load_and_preprocess_data()
 
@@ -200,6 +204,7 @@ if __name__ == "__main__":
     
        # Calculate metrics for all periods
        metrics, equity_curves = aggregate_results(backtest_results)
+       equity_curves.to_csv("eq.csv", index=None)
 
     print("*************************************************************")
     print("                     EQUITY CURVES FOR LAST 4 YEARS          ")

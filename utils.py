@@ -65,9 +65,9 @@ def make_backtest(pdf: pd.DataFrame, leverage, number_of_stocks=20, long_share =
     """
 
     # Rebalance the portfolio: if random_backtest is False, stocks are sorted by Score. If it's True, they are shuffled
-    print(pdf.Date.unique())
+    #print(pdf.Date.unique())
     rebalance = pdf.sort_values(by='Score', ascending=False) if not random_backtest else shuffle(pdf)
-    print(rebalance)
+    #print(rebalance)
 
     # Select the top number_of_stocks for long positions and the bottom number_of_stocks for short positions
     q5 = rebalance.iloc[:number_of_stocks, :] #long
@@ -93,13 +93,13 @@ def make_backtest(pdf: pd.DataFrame, leverage, number_of_stocks=20, long_share =
                            'LongShort': [(longs_returns*long_share - shorts_returns*short_share)],
                            'Universe': [pdf.Log_Return.mean()]})
     
-    print('********************************************************************************')
-    print(f"Longs: {q5[['Symbol', 'Log_Return']].values.tolist()}")
-    print(f"Longs Return: {longs_returns*long_share}")
-    print(f"Shorts: {q1[['Symbol', 'Log_Return']].values.tolist()}")
-    print(f"Shorts Return: {shorts_returns*short_share}")
-    print(f"Overall  Result: {(longs_returns*long_share) - (shorts_returns*short_share)}")
-    print('********************************************************************************')
+    #print('********************************************************************************')
+    #print(f"Longs: {q5[['Symbol', 'Log_Return']].values.tolist()}")
+    #print(f"Longs Return: {longs_returns*long_share}")
+    #print(f"Shorts: {q1[['Symbol', 'Log_Return']].values.tolist()}")
+    #print(f"Shorts Return: {shorts_returns*short_share}")
+    #print(f"Overall  Result: {(longs_returns*long_share) - (shorts_returns*short_share)}")
+    #print('********************************************************************************')
 
     return result
 
