@@ -9,6 +9,9 @@ import xgboost as xgb
 from datetime import timedelta
 from utils import calculate_risk_free_rate, add_benchmark, proces_results, calculate_performance_portfolio_metrics, make_backtest
 
+import os
+from joblib import dump
+
 def parse_arguments():
     parser = argparse.ArgumentParser(description='Train and evaluate multi-factor models.')
     parser.add_argument('--frequency', type=str, default='M', help='Frequency for backtest')
@@ -18,7 +21,7 @@ def parse_arguments():
     parser.add_argument('--simul_random_backtest', action='store_true', help='Flag for simulating random backtest')
     parser.add_argument('--exposure', type=float, default=0.5, help='Exposure of the portfolio')
     parser.add_argument('--leverage', type=float, default=1.5, help='Leverage of the portfolio')
-    model_types = ["xgboost", "ridge", "lasso"]
+    model_types = ["xgboost", "ridge", "lasso", "elasticnet", "averaging"]
     parser.add_argument('--model', type=str, default="xgboost", choices=model_types, help=f'ML algorithm for training. Eligible options: {model_types}')
     parser.add_argument('--preselection', type=bool, default=False, help="If True, features are filtered by preselected in order to reduce dimensionality")
     parser.add_argument('--start', type=str, default="2010-12-31", help='Start of the training period')
@@ -43,18 +46,38 @@ def scale(pdf):
 def train_model(X_train, y_train, algorithm):
     '''Function to train the model based on the selected algorithm'''
     if algorithm == "ridge":
-        model = RidgeCV(alphas=[0.1, 1.0, 100.0], cv=10)
+        model = RidgeCV(alphas=[0.1, 1.0, 100.0], cv=5)
     elif algorithm == "lasso":
         model = LassoCV(alphas=np.logspace(-6, 6, 13), cv=5, random_state=42)
     elif algorithm == "elasticnet":
         model = ElasticNetCV(alphas=np.logspace(-4, 4, 10), l1_ratio=[.1, .5, .7, .9, .95, .99, 1], cv=5, random_state=42)
     elif algorithm == "xgboost":
         model = xgb.XGBRegressor(objective='reg:squarederror', colsample_bytree=0.3, learning_rate=0.1, max_depth=3, alpha=10, n_estimators=100, random_state=42)
+    elif algorithm == "averaging":
+        models = []
+        ridge = RidgeCV(alphas=[0.1, 1.0, 100.0], cv=5)
+        ridge.fit(X_train, y_train)
+        dump(ridge, "models/ridge.joblib")
+        models.append(ridge)
+        lasso = LassoCV(alphas=np.logspace(-6, 6, 13), cv=5, random_state=42)
+        lasso.fit(X_train, y_train)
+        dump(lasso, "models/lasso.joblib")
+        models.append(lasso)
+        elasticnet = ElasticNetCV(alphas=np.logspace(-4, 4, 10), l1_ratio=[.1, .5, .7, .9, .95, .99, 1], cv=5, random_state=42)
+        elasticnet.fit(X_train, y_train)
+        dump(elasticnet, "models/elasticnet.joblib")
+        models.append(elasticnet)
+        xgb_model = xgb.XGBRegressor(objective='reg:squarederror', colsample_bytree=0.3, learning_rate=0.1, max_depth=3, alpha=10, n_estimators=100, random_state=42)
+        xgb_model.fit(X_train, y_train)
+        dump(xgb_model, "models/xgb_model.joblib")
+        models.append(xgb_model)
+        print("models saved")
+        return models
     else:
         raise ValueError("Invalid algorithm choice")
 
     model.fit(X_train, y_train)
-    return model
+    return [model] # list due to potential use of averaging
 
 def evaluate_model(model, X_test, y_test):
     '''Function to evaluate the trained model'''
@@ -66,10 +89,10 @@ def evaluate_model(model, X_test, y_test):
 
 def load_and_preprocess_data():
     #captions = pd.read_csv('data/feats_captions.csv').drop('Index', axis=1).values.squeeze().tolist()
-    captions = pd.read_csv('/home/dufek/Downloads/captions(17).csv').drop('Index', axis=1).values.squeeze().tolist()
+    captions = pd.read_csv('~/Downloads/captions(fm).csv').drop('Index', axis=1).values.squeeze().tolist()
 
     #df_filled = pd.read_csv('data/features.csv').dropna()
-    df_filled = pd.read_csv('/home/dufek/Downloads/df_filled(6).csv').dropna()
+    df_filled = pd.read_csv('~/Downloads/df_filled(1).csv').dropna().sort_values(["Symbol", "Date"])
     df_filled['Date'] = pd.to_datetime(df_filled['Date'])
     if PRESELECTION:
         df_filled = df_filled[captions] # filter out preselected features for better convergence
@@ -85,10 +108,26 @@ def perform_backtest(rebalances, training_end):
     equity_curves = proces_results(backtest_data).assign(Date=lambda df: pd.to_datetime(df['Date']))
     metrics = calculate_performance_portfolio_metrics(equity_curves, calculate_risk_free_rate(FREQUENCY), FREQUENCY)
     print(metrics)
+    
+     # Open the CSV file in append mode
+    with open(OUT_FILE, mode="a") as file:
+        # Write the header information
+        file.write("**************************************************************************")
+        file.write(f"Testing period from {training_end}")
+        file.write("**************************************************************************")
+
+    metrics.to_csv(OUT_FILE, mode="a")
     return backtest_data
 
+def average_predictions(models, X_test):
+    predictions = [model.predict(X_test) for model in models]
+    avg_predictions = np.mean(predictions, axis=0)
+    return avg_predictions
+
 def process_test_period(model, X_test, df_filled, training_end):
-    predictions = pd.DataFrame(model.predict(X_test))
+    avg_pred = average_predictions(model, X_test)
+    #predictions = pd.DataFrame(model.predict(X_test))
+    predictions = pd.DataFrame(avg_pred)
     if TRAINING_MODE == "walk_forward":
         market_data = df_filled[(df_filled['Date'] >= training_end) & (df_filled['Date'] <= training_end + TESTING_WINDOW)].iloc[:, :3]
     elif TRAINING_MODE == "fixed_period":
@@ -108,7 +147,7 @@ def split_data(normalized_df, current_date, training_end, testing_end):
     mask_test = (normalized_df['Date'] >= training_end) & (normalized_df['Date'] <= testing_end)
     X_train = normalized_df[mask_train].iloc[:, 3:]
     y_train = normalized_df[mask_train].iloc[:, 0]
-    X_test = normalized_df[mask_test].iloc[:, 3:]
+    X_test = normalized_df[mask_test].iloc[:, 3:] # could work because model is already trained >_normalized_df.sort_values(["Date", "Symbol"])[mask_test].iloc[:, 3:] BUT do not foreget sort market_data as well
     y_test = normalized_df[mask_test].iloc[:, 0]
     return X_train, y_train, X_test, y_test
 
@@ -122,8 +161,9 @@ def walk_forward_analysis(df_filled, normalized_df):
     backtest_results = []
     current_date = normalized_df['Date'][normalized_df.Date > START].iloc[0]
     end_date = normalized_df['Date'].max()
+    one_month_ahead = end_date + timedelta(days=30) 
 
-    while current_date + TRAINING_WINDOW < end_date:
+    while current_date + TRAINING_WINDOW < end_date and current_date + TRAINING_WINDOW + TESTING_WINDOW < one_month_ahead:
         training_end, testing_end = current_date + TRAINING_WINDOW, current_date + TRAINING_WINDOW + TESTING_WINDOW
         print("**************************************************************************")
         print(f"Testing period from {training_end} to {testing_end}")
@@ -131,11 +171,9 @@ def walk_forward_analysis(df_filled, normalized_df):
 
         # Splitting the data
         X_train, y_train, X_test, y_test = split_data(normalized_df, current_date, training_end, testing_end)
-        
         # Train and evaluate the model
         algorithm = MODEL
         model = train_model(X_train, y_train, algorithm)
-        mse, rmse, r2 = evaluate_model(model, X_test, y_test)
 
         # Additional Processing
         backtest_data = process_test_period(model, X_test, df_filled, training_end)
@@ -157,7 +195,6 @@ def fixed_period(df_filled, normalized_df):
     algorithm = MODEL  # Options: "ridge", "lasso", "elasticnet", "xgboost"
     model = train_model(X_train, y_train, algorithm)
     mse, rmse, r2 = evaluate_model(model, X_test, y_test)
-    print(f"Algorithm: {algorithm}, MSE: {mse}, RMSE: {rmse}, R-squared: {r2}")
 
     # Additional Processing
     backtest_data = process_test_period(model, X_test, df_filled, insample)
@@ -193,6 +230,11 @@ if __name__ == "__main__":
     TRAINING_WINDOW = timedelta(days=int(7 * 365))  # 7 years
     TESTING_WINDOW = timedelta(days=int(1 * 365))       # 1 year
 
+    DIR = "metrics"
+    if not os.path.exists(DIR): os.makedirs(DIR)
+    BASE_FILE = f"{MODEL}_{LEVERAGE}_{EXPOSURE}_{NUMBER_OF_STOCKS}"
+    OUT_FILE = f"./{DIR}/{BASE_FILE}.csv"
+
     df_filled, normalized_df = load_and_preprocess_data()
 
     if TRAINING_MODE == "fixed_period":
@@ -206,6 +248,7 @@ if __name__ == "__main__":
        metrics, equity_curves = aggregate_results(backtest_results)
        equity_curves.to_csv("eq.csv", index=None)
 
+    
     print("*************************************************************")
     print("                     EQUITY CURVES FOR LAST 4 YEARS          ")
     print("*************************************************************")
@@ -215,3 +258,13 @@ if __name__ == "__main__":
     print("                     FINAL RESULTS                           ")
     print("*************************************************************")
     print(metrics)
+    
+    with open(OUT_FILE, mode="a") as file:
+        file.write("****************************************************")
+        file.write("            FINAL RESULTS                           ")
+        file.write("****************************************************")
+    metrics.to_csv(OUT_FILE, mode="a")
+    mode = 'a' if os.path.isfile("metrics/overview.xlsx") else 'w'
+    with pd.ExcelWriter("metrics/overview.xlsx", mode=mode) as writer:
+        metrics.to_excel(writer, sheet_name=BASE_FILE)
+    
